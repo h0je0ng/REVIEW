@@ -1,0 +1,166 @@
+-- 날씨 테이블과 인덱스를 생성
+-- 기본키: 년도 + 월 +일+도시
+-- 보조 인덱스 :  기온,도시
+
+CREATE TABLE 날씨(
+년도 INT,
+월 INT,
+일 INT,
+도시 VARCHAR(20),
+기온 NUMERIC(3,1),
+습도 INT,
+PRIMARY KEY (년도,월,일,도시),
+INDEX 기온인덱스(기온),
+INDEX 도시인덱스(도시)
+);
+
+SHOW INDEX FROM 날씨;
+
+-- 주문건수가 많은 고객순으로 
+-- 고객회사명별로 주문건수를 출력하는 쿼리에 대해 
+-- 실행계획 및 실행 결과에 대한 통계확인
+ANALYZE
+SELECT 고객회사명,COUNT(*) 주문건수
+FROM 고객 INNER JOIN 주문
+ON 고객.고객번호 = 주문.고객번호
+GROUP BY 고객회사명
+ORDER BY COUNT(*) DESC;
+
+-- 1. 주문금액합이 많은 상위 3명의 고객정보를
+-- 보여주는 뷰를 작성하고 실행
+-- 뷰이름 :view_상위3고객
+-- 컬럼 :  고객번호,고객회사명
+-- 담당자명,주문금액합계
+
+CREATE OR REPLACE VIEW view_상위3고객
+AS SELECT   고객.고객번호,
+    고객.고객회사명,
+    고객.담당자명,
+    SUM(단가 * 주문수량) AS 주문금액합계
+FROM 고객,주문,주문세부
+WHERE 고객.고객번호 = 주문.고객번호
+AND 주문.주문번호= 주문세부.주문번호
+GROUP BY 고객.고객번호, 고객.고객회사명,고객.담당자명
+ORDER BY SUM(주문수량*단가) DESC
+LIMIT 3;
+
+
+
+-- 2.제품명별로 주문수량의 합과 주문금액의 합을
+-- 보여주는 뷰를 작성
+-- 뷰이름 : view_제품별주문요약
+-- 컬럼  : 제품명,주문수량합,단가*주문수량주문금액합
+
+CREATE OR REPLACE VIEW view_제품별주문요약(제품명,주문수량합,주문금액합)
+AS SELECT 제품.제품명,SUM(주문세부.주문수량),
+SUM(주문세부.단가*주문세부.주문수량)
+FROM 제품, 주문세부
+WHERE 제품.제품번호 = 주문세부.제품번호
+GROUP BY  제품.제품명;
+
+
+-- 3."view_제품별주문요약'뷰를 사용하여 
+-- 주문수량합이 1000개 이상인 레코드를 검색
+
+SELECT *
+FROM view_제품별주문요약
+WHERE 주문수량합 >= 1000;
+
+-- 4. '광역시'에 사는 고객에 대해 
+-- 고객회사명과 담당자명,도시정보를 보여주는 
+-- 뷰를 작성, 단 해당 뷰를 통해 '광역시' 이외의
+-- 도시에 사는 고객 레코드는 삽입되지 않도록 함
+-- 뷰이름 : view_광역시고객
+
+CREATE OR REPLACE VIEW view_광역시고객
+AS 
+SELECT 고객번호,고객회사명, 담당자명, 도시
+FROM 고객
+WHERE 도시 LIKE '%광역시'
+WITH CHECK OPTION;
+
+
+INSERT INTO view_광역시고객
+VALUES('AZZZ','그린컴퍼니','김그린','울산광역시');
+
+
+-- 5 선생님 PPT 예제
+
+
+CREATE OR REPLACE VIEW view_도시_직위별_고객수
+AS
+SELECT 도시,
+	SUM(CASE WHEN 담당자직위 = '대표이사' THEN 1 ELSE 0 END) AS 대표이사,
+	SUM(CASE WHEN 담당자직위 LIKE '영업%' THEN 1 ELSE 0 END) AS 영업,
+	SUM(CASE WHEN 담당자직위 LIKE '마케팅%' THEN 1 ELSE 0 END) AS 마케팅,
+	SUM(CASE WHEN 담당자직위 LIKE '회계%' THEN 1 ELSE 0 END) AS 회계
+FROM 고객
+GROUP BY 도시;
+
+
+CREATE TABLE 고객_TCL
+AS SELECT*
+FROM 고객;
+
+INSERT INTO 고객_TCL(고객번호,고객회사명,마일리지)
+VALUES('ZZZZA','그린아카데미',1000);
+
+-- 세이브 포인트
+SAVEPOINT INS; -- 책갈피 같은것 > 다시 여기 위치로  돌아갈수 있다 
+
+UPDATE 고객_TCL
+SET 고객회사명 = '초록색학원'
+WHERE 고객번호 = 'ZZZZA';
+
+SAVEPOINT UP;
+
+DELETE FROM 고객_TCL
+WHERE 고객번호 ='ZZZZA';
+
+SAVEPOINT DEL;
+
+ROLLBACK TO UP; -- 책갈피를 이렇게 사용하면 돼
+-- UPDATE로 넘어감 그럼 업데이트부터 다시 새로운 트랜잭션
+
+-- COMMIT 영구적으로 저장하고 싶을때
+COMMIT;
+
+UPDATE 고객_TCL
+SET 고객회사명 = '삭제예정'
+WHERE 고객번호='ZZZZZ';
+
+-- ROLLBACK 이전단계로 되돌리는 것
+ROLLBACK;
+
+SHOW VARIABLES LIKE 'AUTOCOMMIT%';
+SET AUTOCOMMIT = FALSE;
+
+
+-- 읽기 일관성: 어떤 데이터조작이 포함되어있는
+-- 트랜잭션이 완료(COMMIT,ROLLBACK)되기 전까지 
+-- 데이터를 직접 조작한 세션 이외의 다른 세션에서는 
+-- 조작전 상태의 내용이 일관적으로 조회,출력,검색
+-- 하는 특성
+
+SELECT *
+FROM 고객_TCL;
+
+DELETE FROM 고객_TCL
+WHERE 고객번호 ='ZZZZA';
+
+COMMIT; -- 커밋을 하기 전까진 눈에는 안보여도 세션 접근가능
+
+
+-- LOCK :특정 세션에서 조작중인 데이터는 
+-- 트랜잭션이 완료되기 전까지 다른 세션에서 
+-- 조작할수 없는 상태가 됨(잠금)
+-- 화장실처럼 생각해 (누가 쓰고 있으면 다른 사람들은 대기 )
+
+UPDATE 고객_TCL
+SET 고객회사명='그린컴퍼니'
+WHERE 고객번호 = 'ATRAN'; -- 커밋 하기전이라 락이 걸려있어 다른세션 접근 불가
+
+COMMIT; -- 커밋을 해야 이제 쿼리 오케이로 바뀌어서 다른 세션이 진입 가능 
+
+
+
